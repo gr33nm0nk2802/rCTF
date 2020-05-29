@@ -3,7 +3,7 @@ import path from 'path'
 import express from 'express'
 import { Provider } from './types'
 
-let provider: Provider = null
+let provider: Provider | null = null
 
 export const init = (app: express.Application): void => {
   const ProviderClass = require(path.join('../providers', config.uploadProvider.name)).default

@@ -17,7 +17,13 @@ export const notStarted = () => {
   ]
 }
 
-// This function does not work for non JSON stringifiable objects
+/**
+ * Perform a deep-copy of a JSON-stringifiable object
+ *
+ * @template T
+ * @param {T} data data to copy
+ * @returns {T} deep copy of data
+ */
 export const deepCopy = data => {
   return JSON.parse(JSON.stringify(data))
 }

@@ -1,7 +1,7 @@
 import config from '../../config/server'
 import path from 'path'
 import { Challenge, CleanedChallenge } from './types'
-import { Provider } from './Provider'
+import { Provider, ProviderConstructor } from './Provider'
 
 let provider: Provider
 
@@ -32,8 +32,8 @@ const onUpdate = (newChallenges: Challenge[]): void => {
   rebuildCleanedChallenges()
 }
 
-import(path.join('../providers', config.challengeProvider.name))
-  .then(({ default: Provider }) => {
+void import(path.join('../providers', config.challengeProvider.name))
+  .then(({ default: Provider }: { default: ProviderConstructor }) => {
     provider = new Provider(config.challengeProvider.options)
 
     provider.on('update', onUpdate)
