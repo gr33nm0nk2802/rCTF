@@ -1,11 +1,14 @@
 import { v4 as uuidv4 } from 'uuid'
 import emailValidator from 'email-validator'
-import config from '../../../../../config/server'
+import config from '../../../../config/server'
 import { responses } from '../../../../responses'
 import * as cache from '../../../../cache'
 import * as util from '../../../../util'
 import * as auth from '../../../../auth'
 import * as database from '../../../../database'
+import { sendVerification } from '../../../../email'
+
+const recaptchaEnabled = util.recaptcha.checkProtectedAction(util.recaptcha.RecaptchaProtectedActions.setEmail)
 
 export default {
   method: 'PUT',
@@ -17,28 +20,38 @@ export default {
       properties: {
         email: {
           type: 'string'
+        },
+        recaptchaCode: {
+          type: 'string'
         }
       },
-      required: ['email']
+      required: ['email', ...(recaptchaEnabled ? ['recaptchaCode'] : [])]
     }
   },
   handler: async ({ req, user }) => {
+    if (recaptchaEnabled && !await util.recaptcha.verifyRecaptchaCode(req.body.recaptchaCode)) {
+      return responses.badRecaptchaCode
+    }
+
     const email = util.normalize.normalizeEmail(req.body.email)
     if (!emailValidator.validate(email)) {
       return responses.badEmail
     }
 
-    if (config.verifyEmail) {
-      const checkUser = await database.auth.getUserByEmail({
+    if (config.email) {
+      const checkUser = await database.users.getUserByEmail({
         email
       })
       if (checkUser !== undefined) {
         return responses.badKnownEmail
       }
+      if (config.divisionACLs && !util.restrict.divisionAllowed(email, user.division)) {
+        return responses.badEmailChangeDivision
+      }
     } else {
       let result
       try {
-        result = await database.auth.updateUser({
+        result = await database.users.updateUser({
           id: user.id,
           email
         })
@@ -60,14 +73,19 @@ export default {
       verifyId: verifyUuid,
       kind: 'update',
       userId: user.id,
-      email
+      email,
+      division: user.division
     })
 
-    await util.email.sendVerification({
-      email,
-      kind: 'update',
-      token: verifyToken
-    })
+    try {
+      await sendVerification({
+        email,
+        kind: 'update',
+        token: verifyToken
+      })
+    } catch (e) {
+      throw new Error(e.message)
+    }
 
     return responses.goodVerifySent
   }

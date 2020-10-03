@@ -1,6 +1,6 @@
 import { responses } from '../../../responses'
 import perms from '../../../util/perms'
-import { get as getUploadProvider } from '../../../uploads'
+import { upload } from '../../../uploads'
 import toBuffer from 'data-uri-to-buffer'
 
 const itemSchema = {
@@ -35,12 +35,22 @@ export default {
   },
   bodyLimit: 2 ** 30, // 1 GiB
   handler: async ({ req }) => {
-    const uploadProvider = getUploadProvider()
+    let convertedFiles
+    try {
+      convertedFiles = req.body.files.map(({ name, data }) => {
+        return {
+          name,
+          data: toBuffer(data)
+        }
+      })
+    } catch (e) {
+      return responses.badDataUri
+    }
 
     try {
       const files = await Promise.all(
-        req.body.files.map(async ({ name, data }) => {
-          const url = await uploadProvider.upload(toBuffer(data), name)
+        convertedFiles.map(async ({ name, data }) => {
+          const url = await upload(data, name)
 
           return {
             name,
@@ -51,6 +61,10 @@ export default {
 
       return [responses.goodFilesUpload, files]
     } catch (e) {
+      req.log.error(
+        { err: e },
+        e && e.message
+      )
       return responses.badFilesUpload
     }
   }

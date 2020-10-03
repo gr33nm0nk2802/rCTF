@@ -4,8 +4,11 @@ import * as cache from '../../cache'
 import * as util from '../../util'
 import * as auth from '../../auth'
 import * as database from '../../database'
-import config from '../../../config/server'
+import config from '../../config/server'
 import { responses } from '../../responses'
+import { sendVerification } from '../../email'
+
+const recaptchaEnabled = util.recaptcha.checkProtectedAction(util.recaptcha.RecaptchaProtectedActions.recover)
 
 export default {
   method: 'POST',
@@ -17,14 +20,21 @@ export default {
       properties: {
         email: {
           type: 'string'
+        },
+        recaptchaCode: {
+          type: 'string'
         }
       },
-      required: ['email']
+      required: ['email', ...(recaptchaEnabled ? ['recaptchaCode'] : [])]
     }
   },
   handler: async ({ req }) => {
-    if (!config.verifyEmail) {
+    if (!config.email) {
       return responses.badEndpoint
+    }
+
+    if (recaptchaEnabled && !await util.recaptcha.verifyRecaptchaCode(req.body.recaptchaCode)) {
+      return responses.badRecaptchaCode
     }
 
     const email = util.normalize.normalizeEmail(req.body.email)
@@ -32,7 +42,7 @@ export default {
       return responses.badEmail
     }
 
-    const user = await database.auth.getUserByEmail({ email })
+    const user = await database.users.getUserByEmail({ email })
     if (user === undefined) {
       return responses.badUnknownEmail
     }
@@ -46,7 +56,7 @@ export default {
       email
     })
 
-    await util.email.sendVerification({
+    await sendVerification({
       email,
       kind: 'recover',
       token: verifyToken

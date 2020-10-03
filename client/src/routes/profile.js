@@ -8,6 +8,7 @@ import { useToast } from '../components/toast'
 import Form from '../components/form'
 import MembersCard from '../components/profile/members-card'
 import CtftimeCard from '../components/profile/ctftime-card'
+import { PublicSolvesCard, PrivateSolvesCard } from '../components/profile/solves-card'
 import TokenPreview from '../components/token-preview'
 import * as util from '../util'
 import Trophy from '../icons/trophy.svg'
@@ -16,12 +17,7 @@ import UserCircle from '../icons/user-circle.svg'
 import EnvelopeOpen from '../icons/envelope-open.svg'
 import Rank from '../icons/rank.svg'
 import Ctftime from '../icons/ctftime.svg'
-
-const divisionMap = new Map()
-
-for (const division of Object.entries(config.divisions)) {
-  divisionMap.set(division[1], division[0])
-}
+import useRecaptcha, { RecaptchaLegalNotice } from '../components/recaptcha'
 
 const SummaryCard = memo(withStyles({
   icon: {
@@ -32,10 +28,22 @@ const SummaryCard = memo(withStyles({
     },
     marginRight: '1.5em'
   },
-  header: {
+  publicHeader: {
     textOverflow: 'ellipsis',
     overflow: 'hidden',
-    margin: '0 !important'
+    margin: '0 !important',
+    maxWidth: '75vw'
+  },
+  privateHeader: {
+    textOverflow: 'ellipsis',
+    overflow: 'hidden',
+    margin: '0 !important',
+    maxWidth: '30vw'
+  },
+  '@media (max-width: 804px)': {
+    privateHeader: {
+      maxWidth: '75vw'
+    }
   },
   wrapper: {
     display: 'flex',
@@ -43,11 +51,15 @@ const SummaryCard = memo(withStyles({
     paddingTop: '15px',
     paddingBottom: '5px'
   }
-}, ({ name, score, division, divisionPlace, globalPlace, ctftimeId, classes }) =>
-  <div class='card u-flex u-flex-column'>
+}, ({ name, score, division, divisionPlace, globalPlace, ctftimeId, classes, isPrivate }) =>
+  <div class='card'>
     <div class='content'>
       <div class={classes.wrapper}>
-        <h5 class={`title ${classes.header}`} title={name}>{name}</h5>
+        <h5
+          class={`title ${isPrivate ? classes.privateHeader : classes.publicHeader}`}
+          title={name}>
+          {name}
+        </h5>
         {
           ctftimeId &&
               <a href={`https://ctftime.org/team/${ctftimeId}`} target='_blank' rel='noopener noreferrer'>
@@ -93,42 +105,45 @@ const SummaryCard = memo(withStyles({
   </div>
 ))
 
-const SolvesCard = memo(({ solves }) => {
-  if (solves === undefined || solves.length === 0) return null
-  return (
-    <div class='card u-flex u-flex-column'>
-      <div class='content'>
-        <h5 class='title u-text-center'>Solves</h5>
-        <table class='table borderless'>
-          <thead>
-            <tr>
-              <th>Category</th>
-              <th>Name</th>
-              <th>Points</th>
-            </tr>
-          </thead>
-          <tbody>
-            { solves.map(solve =>
-              <tr key={solve.name}>
-                <td>{solve.category}</td>
-                <td>{solve.name}</td>
-                <td>{solve.points}</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-})
+const TeamCodeCard = withStyles({
+  btn: {
+    marginRight: '10px'
+  }
+}, ({ teamToken, classes }) => {
+  const { toast } = useToast()
 
-const TeamCodeCard = memo(({ teamToken }) => {
+  const tokenUrl = `${location.origin}/login?token=${encodeURIComponent(teamToken)}`
+
+  const [reveal, setReveal] = useState(false)
+  const toggleReveal = useCallback(
+    () => setReveal(!reveal),
+    [reveal]
+  )
+
+  const onCopyClick = useCallback(() => {
+    if (navigator.clipboard) {
+      try {
+        navigator.clipboard.writeText(tokenUrl).then(() => {
+          toast({ body: 'Copied team invite URL to clipboard' })
+        })
+      } catch {}
+    }
+  }, [toast, tokenUrl])
+
   return (
-    <div class='card u-flex u-flex-column'>
+    <div class='card'>
       <div class='content'>
         <p>Team Invite</p>
         <p class='font-thin'>Send this team invite URL to your teammates so they can login.</p>
-        <TokenPreview token={`${location.origin}/login?token=${encodeURIComponent(teamToken)}`} />
+
+        <button onClick={onCopyClick} class={`${classes.btn} btn-info u-center`} name='btn' value='submit' type='submit'>Copy</button>
+
+        <button onClick={toggleReveal} class='btn-info u-center' name='btn' value='submit' type='submit'>{reveal ? 'Hide' : 'Reveal'}</button>
+
+        {
+          reveal &&
+            <TokenPreview token={tokenUrl} />
+        }
       </div>
     </div>
   )
@@ -145,9 +160,13 @@ const UpdateCard = withStyles({
   },
   divisionSelect: {
     paddingLeft: '2.75rem'
+  },
+  recaptchaLegalNotice: {
+    marginTop: '20px'
   }
-}, ({ name: oldName, email: oldEmail, divisionId: oldDivision, onUpdate, classes }) => {
+}, ({ name: oldName, email: oldEmail, divisionId: oldDivision, allowedDivisions, onUpdate, classes }) => {
   const { toast } = useToast()
+  const requestRecaptchaCode = useRecaptcha('setEmail')
 
   const [name, setName] = useState(oldName)
   const handleSetName = useCallback((e) => setName(e.target.value), [])
@@ -160,7 +179,7 @@ const UpdateCard = withStyles({
 
   const [isButtonDisabled, setIsButtonDisabled] = useState(false)
 
-  const doUpdate = useCallback((e) => {
+  const doUpdate = useCallback(async (e) => {
     e.preventDefault()
 
     let updated = false
@@ -169,65 +188,62 @@ const UpdateCard = withStyles({
       updated = true
 
       setIsButtonDisabled(true)
-      updateAccount({
+      const { error, data } = await updateAccount({
         name: oldName === name ? undefined : name,
         division: oldDivision === division ? undefined : division
       })
-        .then(({ error, data }) => {
-          setIsButtonDisabled(false)
+      setIsButtonDisabled(false)
 
-          if (error !== undefined) {
-            toast({ body: error, type: 'error' })
-            return
-          }
+      if (error !== undefined) {
+        toast({ body: error, type: 'error' })
+        return
+      }
 
-          toast({ body: 'Profile updated' })
+      toast({ body: 'Profile updated' })
 
-          onUpdate({
-            name: data.user.name,
-            divisionId: Number.parseInt(data.user.division)
-          })
-        })
+      onUpdate({
+        name: data.user.name,
+        divisionId: data.user.division
+      })
     }
 
     if (email !== oldEmail) {
       updated = true
 
-      setIsButtonDisabled(true)
-
-      const handleResponse = ({ error, data }) => {
-        setIsButtonDisabled(false)
-
-        if (error !== undefined) {
-          toast({ body: error, type: 'error' })
-          return
-        }
-
-        toast({ body: data })
-        onUpdate({ email })
-      }
-
+      let error, data
       if (email === '') {
-        deleteEmail()
-          .then(handleResponse)
+        setIsButtonDisabled(true)
+        ;({ error, data } = await deleteEmail())
       } else {
-        updateEmail({
-          email
-        })
-          .then(handleResponse)
+        const recaptchaCode = await requestRecaptchaCode?.()
+        setIsButtonDisabled(true)
+        ;({ error, data } = await updateEmail({
+          email,
+          recaptchaCode
+        }))
       }
+
+      setIsButtonDisabled(false)
+
+      if (error !== undefined) {
+        toast({ body: error, type: 'error' })
+        return
+      }
+
+      toast({ body: data })
+      onUpdate({ email })
     }
 
     if (!updated) {
       toast({ body: 'Nothing to update!' })
     }
-  }, [name, email, division, oldName, oldEmail, oldDivision, onUpdate, toast])
+  }, [name, email, division, oldName, oldEmail, oldDivision, onUpdate, toast, requestRecaptchaCode])
 
   return (
-    <div class='card u-flex u-flex-column'>
+    <div class='card'>
       <div class='content'>
         <p>Update Information</p>
-        <p class='font-thin u-no-margin'>This will change how your team appears on the scoreboard. Note that you may only change your team's name once every 10 minutes.</p>
+        <p class='font-thin u-no-margin'>This will change how your team appears on the scoreboard. You may only change your team's name once every 10 minutes.</p>
         <div class='row u-center'>
           <Form class={`col-12 ${classes.form}`} onSubmit={doUpdate} disabled={isButtonDisabled} buttonText='Update'>
             <input
@@ -256,25 +272,22 @@ const UpdateCard = withStyles({
             <select icon={<AddressBook />} class={`select ${classes.divisionSelect}`} name='division' value={division} onChange={handleSetDivision}>
               <option value='' disabled>Division</option>
               {
-                Object.entries(config.divisions).map(([name, code]) => {
-                  return <option key={code} value={code}>{name}</option>
+                allowedDivisions.map(code => {
+                  return <option key={code} value={code}>{config.divisions[code]}</option>
                 })
               }
             </select>
           </Form>
+          {requestRecaptchaCode && (
+            <div class={classes.recaptchaLegalNotice}>
+              <RecaptchaLegalNotice />
+            </div>
+          )}
         </div>
       </div>
     </div>
   )
 })
-
-const LoggedInRail = memo(({ name, email, teamToken, divisionId, ctftimeId, onUpdate }) =>
-  <div class='col-4'>
-    <TeamCodeCard {...{ teamToken }} />
-    <UpdateCard {...{ name, email, divisionId, onUpdate }} />
-    <CtftimeCard {...{ ctftimeId, onUpdate }} />
-  </div>
-)
 
 const Profile = ({ uuid, classes }) => {
   const [loaded, setLoaded] = useState(false)
@@ -289,9 +302,10 @@ const Profile = ({ uuid, classes }) => {
     score,
     solves,
     teamToken,
-    ctftimeId
+    ctftimeId,
+    allowedDivisions
   } = data
-  const division = divisionMap.get(data.division)
+  const division = config.divisions[data.division]
   const divisionPlace = util.strings.placementString(data.divisionPlace)
   const globalPlace = util.strings.placementString(data.globalPlace)
 
@@ -332,15 +346,15 @@ const Profile = ({ uuid, classes }) => {
     }))
   }, [])
 
-  useEffect(() => { document.title = `Profile${config.ctfTitle}` }, [])
+  useEffect(() => { document.title = `Profile | ${config.ctfName}` }, [])
 
   if (!loaded) return null
 
   if (error !== null) {
     return (
-      <div class={`row u-center ${classes.root}`} style='align-items: initial !important'>
+      <div class='row u-center'>
         <div class='col-4'>
-          <div class='card u-flex u-flex-column'>
+          <div class={`card ${classes.errorCard}`}>
             <div class='content'>
               <p class='title'>There was an error</p>
               <p class='font-thin'>{error}</p>
@@ -352,12 +366,26 @@ const Profile = ({ uuid, classes }) => {
   }
 
   return (
-    <div class={`row u-center ${classes.root}`} style='align-items: initial !important'>
-      { isPrivate && <LoggedInRail {...{ name, email, teamToken, divisionId, ctftimeId }} onUpdate={onProfileUpdate} /> }
-      <div class='col-6'>
-        <SummaryCard {...{ name, score, division, divisionPlace, globalPlace, ctftimeId }} />
-        <SolvesCard solves={solves} />
-        { isPrivate && <MembersCard /> }
+    <div class={classes.root}>
+      {isPrivate && (
+        <div class={classes.privateCol}>
+          <TeamCodeCard {...{ teamToken }} />
+          <UpdateCard {...{ name, email, divisionId, allowedDivisions, onUpdate: onProfileUpdate }} />
+          {config.ctftime && (
+            <CtftimeCard {...{ ctftimeId, onUpdate: onProfileUpdate }} />
+          )}
+        </div>
+      )}
+      <div class={classes.col}>
+        <SummaryCard {...{ name, score, division, divisionPlace, globalPlace, ctftimeId, isPrivate }} />
+        {isPrivate && config.userMembers && (
+          <MembersCard />
+        )}
+        {isPrivate ? (
+          <PrivateSolvesCard solves={solves} />
+        ) : (
+          <PublicSolvesCard solves={solves} />
+        )}
       </div>
     </div>
   )
@@ -365,12 +393,30 @@ const Profile = ({ uuid, classes }) => {
 
 export default withStyles({
   root: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(384px, 1fr))',
+    width: '100%',
+    maxWidth: '1500px',
+    margin: 'auto',
     '& .card': {
-      background: '#222'
+      background: '#222',
+      marginBottom: '20px'
     },
     '& input, & select, & option': {
       background: '#111',
       color: '#fff !important'
     }
+  },
+  col: {
+    margin: '0 auto',
+    width: 'calc(100% - 20px)',
+    marginLeft: '10px'
+  },
+  privateCol: {
+    width: 'calc(100% - 20px)',
+    marginLeft: '10px'
+  },
+  errorCard: {
+    background: '#222'
   }
 }, Profile)

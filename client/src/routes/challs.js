@@ -15,9 +15,10 @@ const loadStates = {
 }
 
 const Challenges = ({ classes }) => {
-  const [problems, setProblems] = useState([])
-  const [categories, setCategories] = useState({})
-  const [showSolved, setShowSolved] = useState(false)
+  const challPageState = useMemo(() => JSON.parse(localStorage.getItem('challPageState') || '{}'), [])
+  const [problems, setProblems] = useState(null)
+  const [categories, setCategories] = useState(challPageState.categories || {})
+  const [showSolved, setShowSolved] = useState(challPageState.showSolved || false)
   const [solveIDs, setSolveIDs] = useState([])
   const [loadState, setLoadState] = useState(loadStates.pending)
   const { toast } = useToast()
@@ -43,11 +44,14 @@ const Challenges = ({ classes }) => {
   }, [])
 
   useEffect(() => {
-    document.title = `Challenges${config.ctfTitle}`
+    document.title = `Challenges | ${config.ctfName}`
   }, [])
 
   useEffect(() => {
     const action = async () => {
+      if (problems !== null) {
+        return
+      }
       const { data, error, notStarted } = await getChallenges()
       if (error) {
         toast({ body: error, type: 'error' })
@@ -59,19 +63,18 @@ const Challenges = ({ classes }) => {
         return
       }
 
-      const problems = data
-      const categories = {}
-      problems.forEach(problem => {
-        if (categories[problem.category] === undefined) {
-          categories[problem.category] = false
+      const newCategories = { ...categories }
+      data.forEach(problem => {
+        if (newCategories[problem.category] === undefined) {
+          newCategories[problem.category] = false
         }
       })
 
-      setProblems(problems)
-      setCategories(categories)
+      setProblems(data)
+      setCategories(newCategories)
     }
     action()
-  }, [toast])
+  }, [toast, categories, problems])
 
   useEffect(() => {
     const action = async () => {
@@ -86,7 +89,14 @@ const Challenges = ({ classes }) => {
     action()
   }, [toast])
 
+  useEffect(() => {
+    localStorage.challPageState = JSON.stringify({ categories, showSolved })
+  }, [categories, showSolved])
+
   const problemsToDisplay = useMemo(() => {
+    if (problems === null) {
+      return []
+    }
     let filtered = problems
     if (!showSolved) {
       filtered = filtered.filter(problem => !solveIDs.includes(problem.id))
@@ -123,21 +133,24 @@ const Challenges = ({ classes }) => {
   const { categoryCounts, solvedCount } = useMemo(() => {
     const categoryCounts = new Map()
     let solvedCount = 0
-    for (const problem of problems) {
-      const solved = solveIDs.includes(problem.id)
-      if (!categoryCounts.has(problem.category)) {
-        categoryCounts.set(problem.category, {
-          total: 1,
-          solved: solved ? 1 : 0
-        })
-      } else {
+    if (problems !== null) {
+      for (const problem of problems) {
+        if (!categoryCounts.has(problem.category)) {
+          categoryCounts.set(problem.category, {
+            total: 0,
+            solved: 0
+          })
+        }
+
+        const solved = solveIDs.includes(problem.id)
         categoryCounts.get(problem.category).total += 1
         if (solved) {
           categoryCounts.get(problem.category).solved += 1
         }
-      }
-      if (solved) {
-        solvedCount += 1
+
+        if (solved) {
+          solvedCount += 1
+        }
       }
     }
     return { categoryCounts, solvedCount }
@@ -169,11 +182,11 @@ const Challenges = ({ classes }) => {
           <div class='frame__body'>
             <div class='frame__title title'>Categories</div>
             {
-              Object.entries(categories).map(([category, checked]) => {
+              Array.from(categoryCounts.entries()).sort((a, b) => a[0].localeCompare(b[0])).map(([category, { solved, total }]) => {
                 return (
                   <div key={category} class='form-ext-control form-ext-checkbox'>
-                    <input id={`category-${category}`} data-category={category} class='form-ext-input' type='checkbox' checked={checked} onChange={handleCategoryCheckedChange} />
-                    <label for={`category-${category}`} class='form-ext-label'>{category} ({categoryCounts.get(category).solved}/{categoryCounts.get(category).total} solved)</label>
+                    <input id={`category-${category}`} data-category={category} class='form-ext-input' type='checkbox' checked={categories[category]} onChange={handleCategoryCheckedChange} />
+                    <label for={`category-${category}`} class='form-ext-label'>{category} ({solved}/{total} solved)</label>
                   </div>
                 )
               })

@@ -1,22 +1,25 @@
-import { Provider } from '../../../uploads/types'
+import { Provider } from '../../../uploads/provider'
 import process from 'process'
 import path from 'path'
 import fs from 'fs'
 import crypto from 'crypto'
-import config from '../../../../config/server'
-import fastify from 'fastify'
-import { Server, IncomingMessage, ServerResponse } from 'http'
+import config from '../../../config/server'
+import { FastifyInstance } from 'fastify'
 import fastifyStatic from 'fastify-static'
 import contentDisposition from 'content-disposition'
 
 interface LocalProviderOptions {
   uploadDirectory?: string;
-  endpoint: string;
+  endpoint?: string;
 }
 
 interface Upload {
   filePath: string;
   name: string;
+}
+
+interface RequestQuerystring {
+  key: string;
 }
 
 export default class LocalProvider implements Provider {
@@ -25,7 +28,7 @@ export default class LocalProvider implements Provider {
 
   private uploadMap: Map<string, Upload>
 
-  constructor (options: LocalProviderOptions, app: fastify.FastifyInstance<Server, IncomingMessage, ServerResponse>) {
+  constructor (options: LocalProviderOptions, app: FastifyInstance) {
     if (options.uploadDirectory === undefined) {
       options.uploadDirectory = path.join(process.cwd(), 'uploads')
     }
@@ -33,37 +36,52 @@ export default class LocalProvider implements Provider {
     fs.mkdirSync(options.uploadDirectory, { recursive: true })
 
     this.uploadDirectory = path.resolve(options.uploadDirectory)
-    this.endpoint = options.endpoint
+    this.endpoint = options.endpoint || '/uploads'
 
-    this.uploadMap = new Map()
+    this.uploadMap = new Map<string, Upload>()
 
-    app.register(async (fastify) => {
-      fastify.register(fastifyStatic, {
+    void app.register(async (fastify) => {
+      void fastify.register(fastifyStatic, {
         root: this.uploadDirectory,
         serve: false
       })
-      fastify.get('/', this.handleRequest.bind(this))
+
+      // Fastify bug #2466
+      // eslint-disable-next-line @typescript-eslint/no-misused-promises
       fastify.setNotFoundHandler(async (req, res) => {
-        res.status(404)
+        void res.status(404)
         return 'Not found'
+      })
+
+      fastify.get<{
+        Querystring: RequestQuerystring
+      }>('/', {
+        schema: {
+          querystring: {
+            type: 'object',
+            properties: {
+              key: {
+                type: 'string'
+              }
+            },
+            required: ['key']
+          }
+        }
+      }, async (request, reply) => {
+        const key = request.query.key.toString()
+
+        const upload = this.uploadMap.get(key)
+        if (upload != null) {
+          void reply.header('Cache-Control', 'public, max-age=31557600, immutable')
+          void reply.header('Content-Disposition', contentDisposition(upload.name))
+          void reply.sendFile(path.relative(this.uploadDirectory, upload.filePath))
+        } else {
+          reply.callNotFound()
+        }
       })
     }, {
       prefix: this.endpoint
     })
-  }
-
-  async handleRequest (req: fastify.FastifyRequest, res: fastify.FastifyReply<ServerResponse>): Promise<void> {
-    const key = req.query.key.toString()
-
-    if (this.uploadMap.has(key)) {
-      const upload = this.uploadMap.get(key)
-
-      res.header('Cache-Control', 'public, max-age=31557600, immutable')
-      res.header('Content-Disposition', contentDisposition(upload.name))
-      res.sendFile(path.relative(this.uploadDirectory, upload.filePath))
-    } else {
-      res.callNotFound()
-    }
   }
 
   private getKey (hash: string, name: string): string {

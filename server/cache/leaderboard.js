@@ -1,6 +1,6 @@
 import { promisify } from 'util'
 import client from './client'
-import config from '../../config/server'
+import config from '../config/server'
 
 const redisEvalsha = promisify(client.evalsha.bind(client))
 const redisHget = promisify(client.hget.bind(client))
@@ -118,8 +118,8 @@ const setGraphScript = redisScript('load', `
 `)
 
 export const setLeaderboard = async ({ challengeValues, solveAmount, leaderboard, leaderboardUpdate }) => {
-  const divisions = Object.values(config.divisions)
-  const divisionKeys = divisions.map((division) => 'division-leaderboard:' + division)
+  const divisions = Object.keys(config.divisions)
+  const divisionKeys = divisions.map(getLeaderboardKey)
   const keys = [
     'score-positions',
     'challenge-info',
@@ -150,8 +150,11 @@ const getLeaderboardKey = (division) => {
   }
 }
 
-export const getRange = async ({ start, end, division }) => {
-  if (start === end) {
+export const getRange = async ({ start, end, division, all }) => {
+  if (all && (start !== undefined || end !== undefined)) {
+    throw new Error('cannot specify all and either start or end')
+  }
+  if (!all && start === end) {
     // zero-length query - get total only
     return {
       total: await redisLlen(getLeaderboardKey(division)) / 3,
@@ -162,8 +165,8 @@ export const getRange = async ({ start, end, division }) => {
     await getRangeScript,
     1,
     getLeaderboardKey(division),
-    start * 3,
-    end * 3 - 1
+    all ? 0 : start * 3,
+    all ? -1 : end * 3 - 1
   )
   const result = []
   for (let i = 0; i < redisResult.length - 1; i += 3) {

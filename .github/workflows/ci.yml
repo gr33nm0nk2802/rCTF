@@ -5,6 +5,19 @@ on:
   pull_request:
 
 jobs:
+  check-commits:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        # Fetch all history
+        fetch-depth: 0
+
+    - name: Check commit messages
+      run: |
+        scripts/check-commits.sh ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }}
+
   shellcheck:
     runs-on: ubuntu-latest
     steps:
@@ -12,7 +25,7 @@ jobs:
 
     - name: Shellcheck
       run: |
-        shellcheck install/*.sh
+        shellcheck install/*.sh scripts/*.sh
 
   lint:
     runs-on: ubuntu-latest
@@ -69,19 +82,21 @@ jobs:
       run: |
         yarn install --frozen-lockfile
 
-    - name: Create table
+    - name: Create DB
       run: |
-        PGPASSWORD=password psql -c 'CREATE DATABASE rctf;' -U postgres -h localhost -p 5432
+        psql postgres://postgres:password@localhost -c 'CREATE DATABASE rctf;'
 
     - name: Load configuration
       run: |
-        cp .env.example .env
-        cp -r .rdeploy.example .rdeploy
-        cp -r config/yml.example config/yml
+        cp test/conf-test.yaml conf.d
 
     - name: Run migrations
       run: |
-        yarn migrate up
+        yarn migrate
+
+    - name: Add data to DB
+      run: |
+        psql "$RCTF_DATABASE_URL" -c $'INSERT INTO challenges (id, data) VALUES (\'id\', \'{"flag": "flag{good_flag}", "name": "name", "files": [], "author": "author", "points": {"max": 500, "min": 100}, "category": "category", "description": "description", "tiebreakEligible": true}\')'
 
     - name: Build
       run: |
@@ -113,5 +128,5 @@ jobs:
         password: ${{ secrets.DOCKERHUB_PASS }}
         repository: redpwn/rctf
         # TODO: handle tagging releases correctly
-        tags: ${{ github.sha }}
+        tags: master,${{ github.sha }}
         # TODO: add cache_froms once we have full releases

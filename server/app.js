@@ -3,15 +3,17 @@ import fastify from 'fastify'
 import fastifyStatic from 'fastify-static'
 import helmet from 'fastify-helmet'
 import hyperid from 'hyperid'
-import { enableCORS, serveIndex, getRealIp } from './util'
+import config from './config/server'
+import { serveIndex, getRealIp } from './util'
 import { init as uploadProviderInit } from './uploads'
 import api, { logSerializers as apiLogSerializers } from './api'
 
 const app = fastify({
+  trustProxy: config.proxy.trust,
   logger: {
     level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
     serializers: {
-      // From https://github.com/fastify/fastify/blob/2.x/lib/logger.js#L54
+      // From https://github.com/fastify/fastify/blob/v3.0.2/lib/logger.js#L49
       req: (req) => ({
         method: req.method,
         url: req.url,
@@ -27,10 +29,11 @@ const app = fastify({
 })
 
 app.addHook('onRequest', async (req, reply) => {
-  req.ip = getRealIp(req)
+  Object.defineProperty(req, 'ip', {
+    get () { return getRealIp(this) }
+  })
 })
 
-app.register(enableCORS)
 app.register(helmet, {
   dnsPrefetchControl: false,
   referrerPolicy: { policy: 'origin-when-cross-origin' },

@@ -1,4 +1,4 @@
-import { Component } from 'preact'
+import { Fragment, Component } from 'preact'
 import { Link } from 'preact-router'
 import Form from '../components/form'
 import config from '../config'
@@ -46,7 +46,7 @@ export default withStyles({
   }
 
   componentDidMount () {
-    document.title = `Login${config.ctfTitle}`
+    document.title = `Login | ${config.ctfName}`
 
     ;(async () => {
       const qs = new URLSearchParams(location.search)
@@ -94,10 +94,16 @@ export default withStyles({
             value={teamToken}
             onChange={this.linkState('teamToken')}
           />
-          <Link href='/recover' class={classes.link}>Lost your team token?</Link>
+          {config.emailEnabled && (
+            <Link href='/recover' class={classes.link}>Lost your team token?</Link>
+          )}
         </Form>
-        <AuthOr />
-        <CtftimeButton class='col-12' onCtftimeDone={this.handleCtftimeDone} />
+        {config.ctftime && (
+          <Fragment>
+            <AuthOr />
+            <CtftimeButton class='col-12' onCtftimeDone={this.handleCtftimeDone} />
+          </Fragment>
+        )}
       </div>
     )
   }
@@ -122,7 +128,7 @@ export default withStyles({
     setAuthToken({ authToken: this.state.pendingAuthToken })
   }
 
-  handleSubmit = e => {
+  handleSubmit = async (e) => {
     e.preventDefault()
     this.setState({
       disabledButton: true
@@ -137,16 +143,16 @@ export default withStyles({
       }
     } catch {}
 
-    login({ teamToken })
-      .then(result => {
-        if (result.authToken) {
-          setAuthToken({ authToken: result.authToken })
-          return
-        }
-        this.setState({
-          errors: result,
-          disabledButton: false
-        })
-      })
+    const result = await login({
+      teamToken
+    })
+    if (result.authToken) {
+      setAuthToken({ authToken: result.authToken })
+      return
+    }
+    this.setState({
+      errors: result,
+      disabledButton: false
+    })
   }
 })

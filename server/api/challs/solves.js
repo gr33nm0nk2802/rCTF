@@ -1,7 +1,7 @@
 import * as db from '../../database'
 import * as challenges from '../../challenges'
 import { responses } from '../../responses'
-import config from '../../../config/server'
+import config from '../../config/server'
 
 export default {
   method: 'GET',
@@ -51,7 +51,8 @@ export default {
       solves: solves.map(solve => ({
         id: solve.id,
         createdAt: solve.createdat.getTime(),
-        userId: solve.userid
+        userId: solve.userid,
+        userName: solve.name
       }))
     }]
   }

@@ -1,16 +1,17 @@
-import config from '../../config/server'
+import config from '../config/server'
 import path from 'path'
 import { Challenge, CleanedChallenge } from './types'
-import { Provider } from './Provider'
+import { Provider, ProviderConstructor } from './Provider'
 import { challUpdateEmitter, publishChallUpdate } from '../cache/challs'
+import { EventEmitter } from 'events'
 
 let provider: Provider
 
 let challenges: Challenge[] = []
 let cleanedChallenges: CleanedChallenge[] = []
 
-let challengesMap: Map<string, Challenge> = new Map()
-let cleanedChallengesMap: Map<string, CleanedChallenge> = new Map()
+let challengesMap = new Map<string, Challenge>()
+let cleanedChallengesMap = new Map<string, CleanedChallenge>()
 
 const cleanChallenge = (chall: Challenge): CleanedChallenge => {
   const { files, description, author, points, id, name, category, sortWeight } = chall
@@ -34,14 +35,15 @@ const onUpdate = (newChallenges: Challenge[]): void => {
   cleanedChallengesMap = new Map(cleanedChallenges.map(c => [c.id, c]))
 }
 
-import(path.join('../providers', config.challengeProvider.name))
-  .then(({ default: Provider }) => {
-    provider = new Provider(config.challengeProvider.options)
+void import(path.join('../providers', config.challengeProvider.name))
+  .then(({ default: Provider }: { default: ProviderConstructor }): void => {
+    provider = new Provider(config.challengeProvider.options ?? {})
 
     provider.on('update', onUpdate)
   })
 
-challUpdateEmitter.on('update', () => {
+// FIXME: remove cast once cache is typed
+;(challUpdateEmitter as EventEmitter).on('update', () => {
   provider.forceUpdate()
 })
 
@@ -53,11 +55,11 @@ export function getCleanedChallenges (): CleanedChallenge[] {
   return cleanedChallenges
 }
 
-export function getChallenge (id: string): Challenge {
+export function getChallenge (id: string): Challenge | undefined {
   return challengesMap.get(id)
 }
 
-export function getCleanedChallenge (id: string): CleanedChallenge {
+export function getCleanedChallenge (id: string): CleanedChallenge | undefined {
   return cleanedChallengesMap.get(id)
 }
 
